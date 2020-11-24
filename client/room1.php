@@ -165,7 +165,10 @@ $user_name = addslashes($_GET["user_name"]);
                 console.log("回复服务器端心跳发送：" + data);
                 websocket.send(data);
 
-            } else if (obj.code == 10) { //服务器端的强制下线
+            } else if(obj.code == 7){ // 系统推送的消息
+                $("#error").append("<p class='red'>系统消息:"+obj.content +"</p>");
+            
+            }else if (obj.code == 10) { //服务器端的强制下线
 
                 if ($("#" + obj.user_id).length > 0) { //如果当前用户还在聊天列表中 则需要显示当前用户已经下线
                     $("#" + obj.user_id + " span").removeClass("blue");

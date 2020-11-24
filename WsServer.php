@@ -16,17 +16,18 @@ class WsServer {
         'ONLINE' => 4,
         'USERS' => 5, //检测用户列表
         'HEARTBEAT' => 6, //心跳检测
+        'NOTICE' => 7, //HTTP的推送信息
     ];
- 
     private $heart_beat_max_times = 3; //最多三次心跳发送 
- 
+
     public function run() {
         $this->start_service();
         $this->start_table();
+        $this->request();
         $this->start_handshake();
         $this->start_message();
         $this->end();
-        
+
         $this->ws->start();
     }
 
@@ -53,8 +54,7 @@ class WsServer {
         $this->user_table->create();
         /* 将共享内存表 存储到 WS的对象中，方便以后的调用 */
         $this->ws->user = $this->user_table;
-        $this->ws->atomic=new Swoole\Atomic();
-        
+        $this->ws->atomic = new Swoole\Atomic();
     }
 
     /* 建立好连接后的操作 */
@@ -112,12 +112,57 @@ class WsServer {
         });
     }
 
+    /* 监听外部HTTP请求 */
+
+    private function request() {
+
+        $this->ws->on('request', function($request, $response) {
+            $params = $request->post;
+            echo "request";
+            var_dump($params);
+            //可以根据传递来的信息进行信息的推送 比如全局推送系统信息
+            $content = trim($params["content"]);
+            if ($params["type"] == "notice") { //全局通知
+                $this->mybroadcast($this->ws, ["code" => self::$code["NOTICE"], "content" => $content]);
+                $this->endRequest('200', '发送成功', $request, $response);
+            } elseif ($params["type"] == "group") { //群组通知  
+                $user_ids = $params["user_id"];
+                $users_ids = implode(",", $user_ids);
+                foreach ($users_ids as $current_id) {
+                    if (!empty($this->ws->user[$current_id]['fd'])) {
+                        $this->sendPeerMsg($this->ws, $this->ws->user[$current_id]['fd'], self::$code["NOTICE"], $content, $error = 0);
+                    }
+                }
+                $this->endRequest('200', '发送成功', $request, $response);
+            } elseif ($params["type"] == "peer") { //单独通知
+                echo "peer\n";
+                $user_ids = $params["user_id"];
+                if (!empty($this->ws->user[$user_ids]['fd'])) {
+                    $this->sendPeerMsg($this->ws, $this->ws->user[$user_ids]['fd'], self::$code["NOTICE"], $content, $error = 0);
+                    $this->endRequest('200', '发送成功', $request, $response);
+                } else {
+                    $this->endRequest('500', '发送失败', $request, $response);
+                }
+            }
+        });
+    }
+
     /* 客户端下线 */
+    
+    private function endRequest($code,$msg,$request,$response){
+        $json=[
+            'code'=>$code,
+            'msg'=>$msg
+        ];
+        $return=$this->json($json);
+        
+        $response->end($return);
+    }
 
     private function end() {
         /* 退出群聊的处理，发送退群信息到客户端（广播），将退群的用户在在高性能共享内存中的状态设置为0 */
         $this->ws->on("close", function($websocket, $fd) {
-            echo "{$fd}退出了群聊";
+           
             $current_user = [];
             foreach ($this->ws->user as $key => $item) {
 
@@ -127,6 +172,10 @@ class WsServer {
                     break;
                 }
             }
+            if(empty($current_user)){
+                return false;
+            }
+            echo "{$fd}退出了群聊";
             $this->ws->user->set($current_user["user_id"], ['status' => 0]);  //不管结果
             $this->mybroadcast($websocket, ['code' => self::$code["CQUIT"], "content" => "用户:{$current_user['user_name']}已经退出了聊天"]);
             $this->ws->close($fd); //回收连接，回收连接资源
@@ -167,7 +216,7 @@ class WsServer {
                     $current_off_line_user = $item;
                     //广播通知下线
                     echo "用户:{$current_off_line_user['user_name']}已经被服务端下线\n";
-                    $this->mybroadcast($this->ws, ["code" => self::$code["SQUIT"],"user_id"=>$current_off_line_user['user_id'], "content" => "用户:{$current_off_line_user['user_name']}已经被服务端下线"]);
+                    $this->mybroadcast($this->ws, ["code" => self::$code["SQUIT"], "user_id" => $current_off_line_user['user_id'], "content" => "用户:{$current_off_line_user['user_name']}已经被服务端下线"]);
                     $this->ws->user->set($key, ["status" => 0]);
                     $this->ws->close($item["fd"]); //取消链接 回收连接资源
                 } else {
@@ -183,9 +232,9 @@ class WsServer {
 
     private function timer() {
         //心跳检测 每一分钟进行一次心跳检测 ，对于三次检测都失败的用户，服务端强制下线 将对应的用户在高性能共享内存表中删除
-        var_dump("无锁计数器：".$this->ws->atomic->get());
-        if ($this->ws->atomic->get()==1) {
-           
+        var_dump("无锁计数器：" . $this->ws->atomic->get());
+        if ($this->ws->atomic->get() == 1) {
+
 
             $obj = $this;
             # 没30秒执行一次心跳检测
