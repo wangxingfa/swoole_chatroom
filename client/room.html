@@ -1,0 +1,118 @@
+
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta http-equiv="Content-Type" content="text/html;charset=UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+        <title>Swoole 聊天室</title>
+        <script src="js/jquery.min.js"></script>
+        <style>
+            html,body{margin:0;padding:0;font-size:13px}
+            .left{width: 20%;height: 600px;border: 1px solid #ddd;float: left;}
+            .right{width: 79.7%;height: 400px;border: 1px solid #ddd;border-left: 0px;float: left;overflow: auto;}
+            .bottom{width: 79.7%;height: 199px;border: 1px solid #ddd;border-left: 0px;border-top: 0px;float: left;}
+            #content{width: 99.5%;height: 165px;}
+            .blue{color:blue}
+            .red{color:red}
+            .div_left{width:100%;float:left}
+            .div_right{width:100%;float:left;text-align: right;}
+            .div_centent{width:100%;float:left;text-align: center;}
+        </style>
+    </head>
+
+    <body>
+        <div id="USER"></div>
+
+        <div class="left">
+            <ul>
+
+            </ul>
+        </div>
+        <div class="right">
+
+
+
+        </div>
+        <div class="bottom">
+            <textarea id="content"></textarea>
+            <button type="button" id="submit">发送消息</button>
+        </div>
+        <script>
+            var wsserver = "ws://192.168.1.246:9502";
+            var websocket = new WebSocket(wsserver);
+            var USER_ID = "user" + Math.round(Math.random() * 10000);
+            $('#USER').html('您的USER_ID为：' + USER_ID);
+
+            websocket.onopen = function (evt) {
+                console.log("WebSocker - 链接成功.");
+                var data = {
+                    'code': 1, // code为1时，是绑定登录请求
+                    'user_id': USER_ID
+                };
+                console.log(data);
+                var newdata = JSON.stringify(data);
+                console.log("连接服务器成功，连接的信息:"+newdata);
+                websocket.send(newdata);
+            };
+            websocket.onclose = function (evt) {
+                alert("链接断开了");
+            };
+
+            // 接收到服务端的消息通知
+            websocket.onmessage = function (evt) {
+                console.log('Retrieved data from server: ' + evt.data);
+                var obj = JSON.parse(evt.data);
+                // 登录广播
+                if (obj.code == 1) {
+                    // 存在修改上线状态
+                    if ($("#" + obj.user_id).length > 0) {
+                        $("#" + obj.user_id + ' span').removeClass('blue');
+                        $("#" + obj.user_id + ' span').addClass('red');
+                        $("#" + obj.user_id + ' span').html('离线');
+                        // 不存在，添加用户列表
+                    } else {
+                        $('.left ul').append('<li id="' + obj.user_id + '">' + obj.user_id + ' <span class="blue">(在线)</span></li>');
+                    }
+                    $('.right').append('<div class="div_centent">' + obj.content + '</div>');
+                    // 下线广播
+                } else if (obj.code == 2) {
+                    $("#" + obj.user_id + ' span').removeClass('blue');
+                    $("#" + obj.user_id + ' span').addClass('red');
+                    $("#" + obj.user_id + ' span').html('离线');
+                    $('.right').append('<div class="div_centent">' + obj.content + '</div>');
+                    // 聊天消息广播
+                } else if (obj.code == 3) {
+                    $('.right').append('<div class="div_left">' + obj.user_id + '：' + obj.content + '</div>');
+                    // 聊天界面默认自动底部
+                    $('.right').scrollTop($('.right')[0].scrollHeight);
+                }
+            };
+        // 接收Socket连接失败时的异常通知
+            websocket.onerror = function (evt, e) {
+                console.log('Error occured: ' + evt.data);
+            };
+        // 点击发送消息按钮
+            $('#submit').click(function () {
+                var content = $('#content').val();
+                $('.right').append('<div class="div_right">' + content + '：' + USER_ID + '</div>');
+                var data = {
+                    'code': 3, // 我们假设code为3时，既为聊天消息广播请求
+                    'user_id': USER_ID,
+                    'content': content
+                };
+                // 前端发送json前，必须先转义成字符串
+                data = JSON.stringify(data);
+                websocket.send(data);
+                // 输入表单清空
+                $('#content').val('');
+                // 聊天界面默认自动底部
+                $('.right').scrollTop($('.right')[0].scrollHeight);
+            });
+
+
+        </script>
+
+
+
+    </body>
+</html>
